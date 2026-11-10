@@ -1,0 +1,15 @@
+{
+  "device_ip": "192.168.0.50",
+  "adb_port": 5555,
+  "adb_binary": "adb",
+  "kiosk_package": "de.ozerov.fully",
+  "kiosk_apk_path": "apk/fully-kiosk.apk",
+  "start_url": "https://piltover.grupoinlog.com.br/tv",
+  "launch_mode": "kiosk_app_url",
+  "watch_interval_seconds": 60,
+  "max_relaunch_attempts": 3,
+  "reboot_times": ["04:00"],
+  "disabled_packages": [],
+  "log_file": "logs/firetv_kiosk.log",
+  "state_file": "logs/firetv_kiosk_state.json"
+}

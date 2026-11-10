@@ -1,0 +1,8 @@
+config.json
+logs/
+apk/
+.claude/validation-status.json
+.claude/settings.local.json
+__pycache__/
+*.pyc
+*.tmp
