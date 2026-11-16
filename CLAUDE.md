@@ -14,6 +14,8 @@ arquivos) em **inglês**. Mensagens ao usuário final podem estar em português.
 - `scripts/validate.py`: validação externa (sintaxe + todas as suítes + indicador de saúde).
 - `scripts/hook_post_edit.py`, `scripts/hook_stop.py`: hooks do Claude Code (`.claude/settings.json`).
 - `scripts/watch_files.py`: observador para alterações feitas fora do Claude.
+- `open_kiosk.bat` (Windows, CRLF) e `open_kiosk.command` (Mac/Linux): launchers de duplo clique que
+  chamam `src/firetv_kiosk.py open`.
 
 ## Salvaguardas automáticas (obrigatório)
 
@@ -32,14 +34,17 @@ salvaguardas ficam em `scripts/validate.py` (`SELF_TEST_CASES`).
 
 ### 3. Execução automática após alterações
 - `PostToolUse` (`Edit|Write|MultiEdit|NotebookEdit`): valida quando o arquivo editado é monitorado
-  (`src/**/*.py`, `scripts/**/*.py`, `config.example.json`, `.claude/settings.json`).
+  (`src/**/*.py`, `scripts/**/*.py`, `config.example.json`, `.claude/settings.json`,
+  `open_kiosk.bat`, `open_kiosk.command`).
 - `PostToolUse` (`Bash`): valida quando o hash do conteúdo monitorado difere do último validado
   (alterações feitas pelo terminal).
 - `Stop`: impede encerrar com status REPROVADO / NÃO VALIDADO para o conteúdo atual; respeita
   `stop_hook_active` (não bloqueia de novo → sem ciclo infinito).
 - `python scripts/watch_files.py`: cobre alterações feitas fora do Claude (precisa estar rodando).
-- A verificação de sintaxe é **externa** (`compile()` em `validate.py`), pois um script com sintaxe
-  inválida não consegue iniciar seus próprios testes.
+- A verificação de sintaxe é **externa** (`compile()` em `validate.py`, `bash -n` nos launchers
+  `.command`), pois um script com sintaxe inválida não consegue iniciar seus próprios testes.
+  Sem bash disponível o resultado é NÃO VALIDADO. O `.bat` não tem verificador de sintaxe; seus
+  testes (`LauncherScriptTests`) checam o comando chamado, CRLF e `pause`.
 - Arquivos gerados (`.claude/validation-status.json`, `logs/`, `__pycache__`) **não** são monitorados,
   então relatórios não disparam nova validação.
 

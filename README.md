@@ -3,6 +3,23 @@
 Faz um Fire TV Stick (Fire OS) abrir sozinho em **https://piltover.grupoinlog.com.br/tv**, em tela cheia,
 e voltar para essa página se algo der errado.
 
+## Jeito mais fácil: duplo clique
+
+Depois de preparar o Fire Stick (Passo 1) e instalar Python + ADB no computador (Passo 2):
+
+- **Windows:** dê duplo clique em **`open_kiosk.bat`**.
+- **Mac:** dê duplo clique em **`open_kiosk.command`** (na 1ª vez: botão direito → Abrir).
+- **Linux:** rode `./open_kiosk.command`.
+
+O script faz tudo sozinho:
+1. Na primeira vez, procura o Fire TV na rede e salva o IP em `config.json`
+   (aceite **"Permitir depuração USB?"** na TV quando aparecer).
+2. Conecta e abre **https://piltover.grupoinlog.com.br/tv**.
+3. Se o Fully Kiosk ainda não estiver instalado, abre no navegador **Silk** da própria TV
+   (para tela cheia e reabertura automática, instale o Fully com o `setup` — Passos 4 e 5).
+
+Para abrir de novo depois (ex.: alguém fechou), é só dar duplo clique outra vez.
+
 ## Como funciona (resumo)
 
 1. **Uma vez**, de um computador na mesma rede Wi-Fi do Fire Stick, você roda o `setup`: ele instala o
@@ -111,6 +128,7 @@ Para rodar sempre:
 
 | Comando | O que faz |
 |---|---|
+| `open` | Duplo clique: acha o Fire TV (1ª vez), conecta e abre a URL; sem Fully, usa o Silk. `--config` é opcional |
 | `discover [--subnet 192.168.0.0/24]` | Procura aparelhos com ADB na rede |
 | `check` | Conecta, confere Fire OS e kiosk instalado (não altera nada) |
 | `setup` | `check` + instala o APK se faltar + desativa `disabled_packages` (idempotente) |

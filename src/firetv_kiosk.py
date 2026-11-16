@@ -748,17 +748,28 @@ def scan_for_adb(network: ipaddress.IPv4Network, port: int = 5555,
     return [h for h, is_open in results if is_open]
 
 
-def identify_device(runner: AdbRunner, host: str, port: int) -> str:
+def probe_fire_tv(runner: AdbRunner, host: str, port: int) -> tuple:
+    """Connect to host:port and return (is_fire_tv, label)."""
     serial = f"{host}:{port}"
     connect = runner.run(["connect", serial])
     if not connect.ok or "connected to" not in connect.output.lower():
-        return "porta aberta (conexão ADB não autorizada ou recusada — aceite o pedido na TV e tente de novo)"
+        return False, "porta aberta (conexão ADB não autorizada ou recusada — aceite o pedido na TV e tente de novo)"
     manufacturer = runner.run(["-s", serial, "shell", "getprop", "ro.product.manufacturer"]).stdout.strip()
     model = runner.run(["-s", serial, "shell", "getprop", "ro.product.model"]).stdout.strip()
     label = f"{manufacturer} {model}".strip() or "aparelho Android"
-    if "amazon" in manufacturer.lower():
+    is_fire_tv = "amazon" in manufacturer.lower()
+    if is_fire_tv:
         label += "  <-- Fire TV"
-    return label
+    return is_fire_tv, label
+
+
+def identify_device(runner: AdbRunner, host: str, port: int) -> str:
+    return probe_fire_tv(runner, host, port)[1]
+
+
+def local_network(local_ip_fn: Callable[[], Optional[str]] = local_ipv4) -> Optional[ipaddress.IPv4Network]:
+    ip = local_ip_fn()
+    return ipaddress.ip_network(f"{ip}/24", strict=False) if ip else None
 
 
 def command_discover(subnet: Optional[str], port: int, runner: Optional[AdbRunner], out,
@@ -869,7 +880,103 @@ def command_watch(ctl: DeviceController, once: bool = False) -> int:
     return EXIT_OK
 
 
-COMMANDS = ("check", "setup", "launch", "watch", "reboot", "clear-cache", "restore", "discover")
+DEFAULT_CONFIG_PATH = SCRIPT_PATH.parent.parent / "config.json"
+EXAMPLE_CONFIG_PATH = SCRIPT_PATH.parent.parent / "config.example.json"
+
+
+def find_fire_tv(runner: AdbRunner, port: int, out,
+                 probe: Callable[[str, int], bool] = tcp_port_open,
+                 local_ip_fn: Callable[[], Optional[str]] = local_ipv4) -> str:
+    """Scan the local /24 and return the IP of the first device identified as a Fire TV."""
+    network = local_network(local_ip_fn)
+    if network is None:
+        raise PreconditionError("Não foi possível descobrir a rede deste computador. Ele está conectado ao Wi-Fi/cabo?")
+    print(f"Procurando o Fire TV na rede {network} (pode levar alguns segundos) ...", file=out, flush=True)
+    candidates = scan_for_adb(network, port, probe)
+    labels = []
+    for host in candidates:
+        is_fire_tv, label = probe_fire_tv(runner, host, port)
+        labels.append(f"{host}: {label}")
+        if is_fire_tv:
+            print(f"Fire TV encontrado: {host}", file=out, flush=True)
+            return host
+    detail = ("\n  Encontrados, mas não identificados como Fire TV:\n  " + "\n  ".join(labels)) if labels else ""
+    raise PreconditionError(
+        "Nenhum Fire TV encontrado na rede." + detail + "\n"
+        "Confira no Fire TV: Configurações > Minha Fire TV > Opções do desenvolvedor > Depuração ADB = ATIVADO, "
+        "e aceite 'Permitir depuração USB?' na tela da TV. Depois rode de novo."
+    )
+
+
+def create_config(config_path: Path, device_ip: str, example_path: Path = EXAMPLE_CONFIG_PATH) -> None:
+    raw: dict = {}
+    if example_path.is_file():
+        try:
+            raw = json.loads(example_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"config.example.json inválido: {exc}") from exc
+    raw.setdefault("start_url", "https://piltover.grupoinlog.com.br/tv")
+    raw["device_ip"] = device_ip
+    validate_config_dict(raw, config_path.resolve().parent)  # never write an invalid config
+    config_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def command_open(config_path: Path, make_runner: Callable[[str], AdbRunner], out,
+                 example_path: Path = EXAMPLE_CONFIG_PATH, dry_run: bool = False,
+                 probe: Callable[[str, int], bool] = tcp_port_open,
+                 local_ip_fn: Callable[[], Optional[str]] = local_ipv4,
+                 sleep_fn: Callable[[float], None] = time.sleep) -> int:
+    """One-click flow: find the Fire TV (first run only), connect and open start_url.
+
+    Opens in the kiosk app when installed; otherwise falls back to the Silk browser so the
+    page still opens without any APK.
+    """
+    if not config_path.is_file():
+        if dry_run:
+            print("Erro: config.json não existe; rode sem --dry-run para procurar o Fire TV.", file=out)
+            return EXIT_FAILURE
+        print("Primeira execução: config.json ainda não existe.", file=out, flush=True)
+        try:
+            example = json.loads(example_path.read_text(encoding="utf-8")) if example_path.is_file() else {}
+        except json.JSONDecodeError:
+            example = {}
+        adb_binary = example.get("adb_binary", "adb")
+        port = example.get("adb_port", 5555)
+        try:
+            device_ip = find_fire_tv(make_runner(adb_binary), port, out, probe, local_ip_fn)
+            create_config(config_path, device_ip, example_path)
+        except KioskError as exc:
+            print(f"Erro: {exc}", file=out)
+            return EXIT_FAILURE
+        print(f"Configuração salva em {config_path.name} (device_ip = {device_ip}).", file=out, flush=True)
+
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as exc:
+        print(f"Erro: {exc}", file=out)
+        return EXIT_FAILURE
+    setup_logging(cfg.log_file)
+    try:
+        ctl = DeviceController(cfg, make_runner(cfg.adb_binary), dry_run=dry_run, sleep_fn=sleep_fn, out=out)
+        print(f"Conectando ao Fire TV {cfg.serial} ...", file=out, flush=True)
+        ctl.connect()
+        if not dry_run and cfg.launch_mode != "silk_intent" and not ctl.is_installed():
+            print("Fully Kiosk não está instalado; abrindo no navegador Silk (rode 'setup' para o modo kiosk).",
+                  file=out, flush=True)
+            cfg.launch_mode = "silk_intent"
+        ctl.launch()
+        print(f"Pronto! A TV está abrindo {cfg.start_url}", file=out)
+        logger.info("open finished (launch_mode=%s)", cfg.launch_mode)
+        return EXIT_OK
+    except KioskError as exc:
+        logger.error("open failed: %s", exc)
+        print(f"Erro: {exc}", file=out)
+        return EXIT_FAILURE
+    finally:
+        close_logging()
+
+
+COMMANDS = ("check", "setup", "launch", "watch", "reboot", "clear-cache", "restore", "discover", "open")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -916,6 +1023,20 @@ def main(argv: Optional[list] = None, runner_factory: Optional[Callable[[Config,
             adb_path = find_adb_binary("adb")
             runner = SubprocessAdbRunner(adb_path) if adb_path else None
         return command_discover(args.subnet, port, runner, out)
+
+    if args.command == "open":
+        config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+
+        def make_runner(adb_binary: str) -> AdbRunner:
+            if runner_factory is not None:
+                return runner_factory(None, args.dry_run)
+            if args.dry_run:
+                return DryRunAdbRunner(adb_binary, out=out)
+            adb_path = find_adb_binary(adb_binary)
+            if not adb_path:
+                raise PreconditionError(ADB_MISSING_MESSAGE)
+            return SubprocessAdbRunner(adb_path)
+        return command_open(config_path, make_runner, out, dry_run=args.dry_run, sleep_fn=sleep_fn)
 
     if not args.config:
         print("Erro: --config é obrigatório para este comando.", file=err)
@@ -1540,6 +1661,141 @@ class DiscoverTests(_TempDirTestCase):
             scan_for_adb(ipaddress.ip_network("10.0.0.0/16"), 5555, probe=lambda h, p: False)
 
 
+class OpenTests(_TempDirTestCase):
+    """One-click 'open' command used by the double-click launchers."""
+
+    def example(self, **overrides) -> Path:
+        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv",
+               "launch_mode": "kiosk_app_url", "log_file": "logs/test.log", "state_file": "logs/state.json"}
+        raw.update(overrides)
+        path = self.tmp / "config.example.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        return path
+
+    def run_open(self, runner: FakeAdbRunner, config_path: Optional[Path] = None, open_hosts=("192.168.1.7",),
+                 dry_run: bool = False):
+        out = io.StringIO()
+        code = command_open(config_path or self.tmp / "config.json", lambda adb: runner, out,
+                            example_path=self.example(), dry_run=dry_run,
+                            probe=lambda h, p: h in open_hosts, local_ip_fn=lambda: "192.168.1.20",
+                            sleep_fn=lambda s: None)
+        return code, out.getvalue()
+
+    def discovery_rules(self, installed: bool = True) -> dict:
+        rules = healthy_device_rules(installed)
+        rules["connect "] = ok("connected to 192.168.1.7:5555\n")
+        return rules
+
+    def test_first_run_discovers_fire_tv_and_writes_config(self):
+        """1ª execução: acha o Fire TV, grava config.json com o IP e abre a URL."""
+        runner = FakeAdbRunner(self.discovery_rules())
+        code, output = self.run_open(runner)
+        self.assertEqual(code, EXIT_OK, output)
+        saved = json.loads((self.tmp / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["device_ip"], "192.168.1.7")
+        self.assertEqual(saved["start_url"], "https://piltover.grupoinlog.com.br/tv")
+        self.assertEqual(runner.commands_matching("am start"), [
+            "-s 192.168.1.7:5555 shell am start -a android.intent.action.VIEW "
+            "-d https://piltover.grupoinlog.com.br/tv -n de.ozerov.fully/.MainActivity"])
+        self.assertIn("Pronto!", output)
+
+    def test_existing_config_skips_discovery(self):
+        """Com config.json existente, não varre a rede e usa o IP salvo."""
+        config = self.write_config(launch_mode="kiosk_app_url")
+        runner = FakeAdbRunner(healthy_device_rules())
+        code, output = self.run_open(runner, config_path=config, open_hosts=())
+        self.assertEqual(code, EXIT_OK, output)
+        self.assertNotIn("Procurando", output)
+        self.assertEqual(runner.calls[0], "connect 192.168.0.50:5555")
+
+    def test_falls_back_to_silk_when_kiosk_missing(self):
+        """Sem Fully instalado, abre a URL no Silk (sem -n do Fully, sem monkey)."""
+        config = self.write_config(launch_mode="kiosk_app_url")
+        runner = FakeAdbRunner(healthy_device_rules(installed=False))
+        code, output = self.run_open(runner, config_path=config)
+        self.assertEqual(code, EXIT_OK, output)
+        self.assertEqual(runner.commands_matching("am start"), [
+            "-s 192.168.0.50:5555 shell am start -a android.intent.action.VIEW -d https://piltover.grupoinlog.com.br/tv"])
+        self.assertEqual(runner.commands_matching("monkey"), [])
+        self.assertIn("Silk", output)
+
+    def test_no_fire_tv_found_writes_no_config(self):
+        """Nenhum Fire TV na rede: código 1, orientação clara e nenhum config.json criado."""
+        code, output = self.run_open(FakeAdbRunner(self.discovery_rules()), open_hosts=())
+        self.assertEqual(code, EXIT_FAILURE)
+        self.assertIn("Nenhum Fire TV", output)
+        self.assertFalse((self.tmp / "config.json").exists())
+
+    def test_non_fire_tv_device_is_not_selected(self):
+        """Aparelho Android que não é Fire TV não é escolhido."""
+        rules = self.discovery_rules()
+        rules["ro.product.manufacturer"] = ok("Xiaomi\n")
+        code, output = self.run_open(FakeAdbRunner(rules))
+        self.assertEqual(code, EXIT_FAILURE)
+        self.assertIn("192.168.1.7: Xiaomi", output)
+        self.assertFalse((self.tmp / "config.json").exists())
+
+    def test_connection_failure_reports_vega_hint(self):
+        """Falha de conexão: código 1 com orientação (Vega OS / Depuração ADB), sem abrir nada."""
+        config = self.write_config()
+        runner = FakeAdbRunner({"connect ": ok("failed to connect to 192.168.0.50:5555")})
+        code, output = self.run_open(runner, config_path=config)
+        self.assertEqual(code, EXIT_FAILURE)
+        self.assertIn("Vega OS", output)
+        self.assertEqual(runner.commands_matching("am start") + runner.commands_matching("monkey"), [])
+
+    def test_invalid_existing_config_is_rejected(self):
+        """config.json inválido: código 1 citando o campo, sem chamar ADB."""
+        config = self.write_config(start_url="piltover.grupoinlog.com.br/tv")
+        runner = FakeAdbRunner(healthy_device_rules())
+        code, output = self.run_open(runner, config_path=config)
+        self.assertEqual(code, EXIT_FAILURE)
+        self.assertIn("start_url", output)
+        self.assertEqual(runner.calls, [])
+
+    def test_dry_run_without_config_does_not_scan(self):
+        """--dry-run sem config.json não varre a rede nem grava nada."""
+        runner = FakeAdbRunner(self.discovery_rules())
+        code, output = self.run_open(runner, dry_run=True)
+        self.assertEqual(code, EXIT_FAILURE)
+        self.assertEqual(runner.calls, [])
+        self.assertFalse((self.tmp / "config.json").exists())
+
+    def test_cli_open_accepts_missing_config_flag(self):
+        """CLI: 'open --config X' usa o caminho informado (o --config é opcional)."""
+        config = self.write_config(launch_mode="kiosk_app")
+        runner = FakeAdbRunner(healthy_device_rules())
+        code, output = self.run_main(["--config", str(config), "open"], runner)
+        self.assertEqual(code, EXIT_OK, output)
+        self.assertEqual(len(runner.commands_matching("monkey -p de.ozerov.fully")), 1)
+
+
+class LauncherScriptTests(unittest.TestCase):
+    """Double-click launchers shipped at the project root."""
+    ROOT = SCRIPT_PATH.parent.parent
+
+    def test_windows_launcher_runs_open_with_crlf(self):
+        """open_kiosk.bat chama 'src\\firetv_kiosk.py open', usa CRLF e pausa no fim."""
+        path = self.ROOT / "open_kiosk.bat"
+        self.assertTrue(path.is_file(), f"ausente: {path}")
+        data = path.read_bytes()
+        self.assertIn(b"src\\firetv_kiosk.py open", data)
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""), "o .bat deve usar quebras de linha CRLF")
+        self.assertIn(b"pause", data.lower())
+
+    def test_unix_launcher_runs_open_and_is_executable(self):
+        """open_kiosk.command chama 'src/firetv_kiosk.py open' a partir da própria pasta e é executável."""
+        path = self.ROOT / "open_kiosk.command"
+        self.assertTrue(path.is_file(), f"ausente: {path}")
+        text = path.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("#!/usr/bin/env bash"), text[:30])
+        self.assertIn('cd "$(dirname "$0")"', text)
+        self.assertIn("src/firetv_kiosk.py open", text)
+        self.assertNotIn("\r", text)
+        if os.name == "posix":
+            self.assertTrue(os.access(path, os.X_OK), "open_kiosk.command precisa de permissão de execução")
+
+
 class SelfTestTests(unittest.TestCase):
     def test_self_test_exit_codes(self):
         """Classificação 0/1/2: aprovado, reprovado, sem testes."""
@@ -1608,7 +1864,7 @@ class SelfTestTests(unittest.TestCase):
 
 
 TEST_CASES = (ConfigTests, ConnectionTests, SetupTests, LaunchTests, WatchTests,
-              PackageTests, SafetyTests, DiscoverTests, SelfTestTests)
+              PackageTests, SafetyTests, DiscoverTests, OpenTests, LauncherScriptTests, SelfTestTests)
 
 
 def classify_result(total: int, failed: int, skipped: int) -> tuple:

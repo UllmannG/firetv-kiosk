@@ -17,6 +17,8 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,7 +36,8 @@ EXIT_BY_STATUS = {STATUS_APPROVED: 0, STATUS_FAILED: 1, STATUS_NOT_VALIDATED: 2}
 
 STATUS_FILE_REL = ".claude/validation-status.json"
 MONITORED_GLOBS = ("src/**/*.py", "scripts/**/*.py")
-MONITORED_FILES = ("config.example.json", ".claude/settings.json")
+MONITORED_FILES = ("config.example.json", ".claude/settings.json", "open_kiosk.bat", "open_kiosk.command")
+SHELL_SUFFIXES = (".command", ".sh")
 EXCLUDED_PARTS = {"__pycache__", "logs", ".git"}
 SUITE_TIMEOUT_SECONDS = 180
 
@@ -111,6 +114,32 @@ def check_syntax(root: Path) -> list:
     return failures
 
 
+def check_shell_syntax(root: Path, bash_path: Optional[str] = None) -> tuple:
+    """`bash -n` on monitored shell launchers. Returns (failures, problems).
+
+    A missing bash is a problem (NÃO VALIDADO), never a pass.
+    """
+    scripts = [p for p in monitored_files(root) if p.suffix in SHELL_SUFFIXES]
+    if not scripts:
+        return [], []
+    bash = bash_path if bash_path is not None else shutil.which("bash")
+    if not bash:
+        return [], [f"bash indisponível: sintaxe de {', '.join(p.name for p in scripts)} não verificada"]
+    failures = []
+    for path in scripts:
+        rel = path.relative_to(root).as_posix()
+        try:
+            proc = subprocess.run([bash, "-n", str(path)], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return failures, [f"bash -n {rel} não executou: {exc}"]
+        if proc.returncode != 0:
+            message = proc.stderr.strip().splitlines()[0] if proc.stderr.strip() else f"rc={proc.returncode}"
+            match = re.search(r"line (\d+)", message)
+            location = f"{rel}:{match.group(1)}" if match else rel
+            failures.append(_syntax_failure(rel, location, message, f"bash -n {rel}"))
+    return failures, []
+
+
 def _syntax_failure(script: str, location: str, observed: str, reproduce: str) -> dict:
     return {
         "script": script,
@@ -152,9 +181,10 @@ def run_suite(root: Path, script_rel: str, args: list, timeout: int = SUITE_TIME
     return {**base, **report, "suite": script_rel}
 
 
-def aggregate(syntax_failures: list, suite_reports: list, hash_before: str, hash_after: str) -> dict:
+def aggregate(syntax_failures: list, suite_reports: list, hash_before: str, hash_after: str,
+              extra_problems: Optional[list] = None) -> dict:
     failures = list(syntax_failures)
-    problems = []
+    problems = list(extra_problems or [])
     total = failed = skipped = 0
     for report in suite_reports:
         total += report.get("total_tests", 0)
@@ -194,11 +224,13 @@ def validate(root: Path = PROJECT_ROOT, suites=TEST_SUITES, timeout: int = SUITE
     root = root.resolve()
     hash_before = content_hash(root)
     syntax_failures = check_syntax(root)
+    shell_failures, shell_problems = check_shell_syntax(root)
+    syntax_failures += shell_failures
     reports = []
     if not syntax_failures:
         for script_rel, args in suites:
             reports.append(run_suite(root, script_rel, args, timeout))
-    result = aggregate(syntax_failures, reports, hash_before, content_hash(root))
+    result = aggregate(syntax_failures, reports, hash_before, content_hash(root), shell_problems)
     write_status(root, result)
     return result
 
@@ -399,6 +431,44 @@ class ValidationTests(_ProjectCase):
     def test_missing_status_is_not_validated(self):
         """Sem status gravado → NÃO VALIDADO."""
         self.assertEqual(current_status(self.project())["status"], STATUS_NOT_VALIDATED)
+
+    def test_shell_launcher_syntax_error_is_failed(self):
+        """Erro de sintaxe no open_kiosk.command → REPROVADO com arquivo:linha (bash -n externo)."""
+        if not shutil.which("bash"):
+            self.fail("bash indisponível: este teste exige bash para validar o launcher")
+        root = self.project()
+        (root / "open_kiosk.command").write_text("#!/usr/bin/env bash\necho ok\nif [ 1 -eq 1 ]; then\n", encoding="utf-8")
+        result = validate(root, FAKE_SUITES)
+        self.assertEqual(result["status"], STATUS_FAILED)
+        self.assertTrue(result["failures"][0]["location"].startswith("open_kiosk.command"), result["failures"])
+        self.assertEqual(result["failures"][0]["reproduce"], "bash -n open_kiosk.command")
+
+    def test_valid_shell_launcher_passes(self):
+        """open_kiosk.command válido não impede APROVADO."""
+        root = self.project()
+        (root / "open_kiosk.command").write_text("#!/usr/bin/env bash\necho ok\n", encoding="utf-8")
+        self.assertEqual(validate(root, FAKE_SUITES)["status"], STATUS_APPROVED)
+
+    def test_missing_bash_is_not_validated(self):
+        """Sem bash para checar o launcher → NÃO VALIDADO (nunca APROVADO)."""
+        root = self.project()
+        (root / "open_kiosk.command").write_text("#!/usr/bin/env bash\necho ok\n", encoding="utf-8")
+        failures, problems = check_shell_syntax(root, bash_path="")
+        self.assertEqual(failures, [])
+        self.assertIn("bash indisponível", problems[0])
+        result = aggregate([], [{"suite": "x", "status": STATUS_APPROVED, "total_tests": 3, "failed_tests": 0,
+                                 "skipped_tests": 0, "failures": []}], "h", "h", problems)
+        self.assertEqual(result["status"], STATUS_NOT_VALIDATED)
+
+    def test_launchers_are_monitored(self):
+        """Editar open_kiosk.bat ou open_kiosk.command muda o hash e dispara validação."""
+        root = self.project()
+        (root / "open_kiosk.bat").write_bytes(b"@echo off\r\n")
+        before = content_hash(root)
+        (root / "open_kiosk.bat").write_bytes(b"@echo on\r\n")
+        self.assertNotEqual(content_hash(root), before)
+        self.assertTrue(is_monitored(root, str(root / "open_kiosk.bat")))
+        self.assertTrue(is_monitored(root, "open_kiosk.command"))
 
 
 def _load_module(name: str):

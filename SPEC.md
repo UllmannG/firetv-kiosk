@@ -72,6 +72,7 @@ Validações: IP válido, porta 1–65535, URL http/https, `HH:MM`, intervalos p
 | `clear-cache` | `pm clear` do kiosk somente com `--yes`. | 0/1 |
 | `restore` | Reativa os pacotes registrados no estado. | 0/1 |
 | `discover` | Procura aparelhos com ADB aberto na sub-rede local (não requer config). | 0/1 |
+| `open` | Um clique: sem `config.json`, acha o Fire TV e grava o config; conecta e abre a `start_url`. Sem o kiosk instalado, cai para `silk_intent`. Usado por `open_kiosk.bat` / `open_kiosk.command`. | 0/1 |
 | `--self-test` | Testes embutidos; não executa operação normal. | 0/1/2 |
 
 Flag global `--dry-run`: imprime os comandos ADB sem executá-los.
