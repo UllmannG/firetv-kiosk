@@ -118,5 +118,5 @@ Config, Connection, Setup, Launch, Watch, Packages, Safety, Discover, Self-test 
 
 - **Arquitetura híbrida:** o computador é usado uma vez para `setup`/`launch`; depois o próprio Fully mantém a página (Launch on Boot, Bring to Foreground, Auto Reload). `watch` é reforço opcional.
 - **Host:** desconhecido → código multiplataforma com detecção do `adb` e comando `discover` para achar o IP.
-- **URL:** `https://piltover.grupoinlog.com.br/tv`. Configuração do Fully feita manualmente uma vez (sem API remota, sem senha armazenada). `launch_mode: kiosk_app_url` tenta abrir o Fully já na URL e cai para o LAUNCHER se o intent falhar.
+- **URL:** `https://piltover.grupoinlog.com.br/tv/parear`. Configuração do Fully feita manualmente uma vez (sem API remota, sem senha armazenada). `launch_mode: kiosk_app_url` tenta abrir o Fully já na URL e cai para o LAUNCHER se o intent falhar.
 - **disabled_packages:** vazio; sugestões no README.

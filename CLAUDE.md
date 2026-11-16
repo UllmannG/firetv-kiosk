@@ -1,7 +1,7 @@
 # CLAUDE.md — firetv-kiosk
 
 Controlador (Python 3.10+, só biblioteca padrão) que mantém um Fire TV Stick (Fire OS) aberto em
-`https://piltover.grupoinlog.com.br/tv` via Fully Kiosk Browser. Roda no PC, nunca no aparelho.
+`https://piltover.grupoinlog.com.br/tv/parear` via Fully Kiosk Browser. Roda no PC, nunca no aparelho.
 Especificação completa: `SPEC.md`. Uso: `README.md`.
 
 ## Regra de idioma

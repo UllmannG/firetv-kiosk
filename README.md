@@ -1,6 +1,6 @@
 # Fire TV Kiosk — piltover
 
-Faz um Fire TV Stick (Fire OS) abrir sozinho em **https://piltover.grupoinlog.com.br/tv**, em tela cheia,
+Faz um Fire TV Stick (Fire OS) abrir sozinho em **https://piltover.grupoinlog.com.br/tv/parear**, em tela cheia,
 e voltar para essa página se algo der errado.
 
 ## Jeito mais fácil: duplo clique
@@ -14,7 +14,7 @@ Depois de preparar o Fire Stick (Passo 1) e instalar Python + ADB no computador 
 O script faz tudo sozinho:
 1. Na primeira vez, procura o Fire TV na rede e salva o IP em `config.json`
    (aceite **"Permitir depuração USB?"** na TV quando aparecer).
-2. Conecta e abre **https://piltover.grupoinlog.com.br/tv**.
+2. Conecta e abre **https://piltover.grupoinlog.com.br/tv/parear**.
 3. Se o Fully Kiosk ainda não estiver instalado, abre no navegador **Silk** da própria TV
    (para tela cheia e reabertura automática, instale o Fully com o `setup` — Passos 4 e 5).
 
@@ -96,7 +96,7 @@ Com o Fully aberto, abra o menu de configurações (deslize da borda esquerda / 
 
 | Onde (Settings) | Opção | Valor |
 |---|---|---|
-| Web Content Settings | Start URL | `https://piltover.grupoinlog.com.br/tv` |
+| Web Content Settings | Start URL | `https://piltover.grupoinlog.com.br/tv/parear` |
 | Device Management | Launch on Boot | ativado |
 | Device Management / Kiosk | Bring to Foreground (após sair do app) | ativado |
 | Web Auto Reload | Auto Reload on Page Error / Network Reconnect | ativado |
@@ -104,6 +104,16 @@ Com o Fully aberto, abra o menu de configurações (deslize da borda esquerda / 
 
 Os nomes podem variar um pouco conforme a versão do Fully. Algumas opções de kiosk exigem a licença
 Fully **Plus**. Não armazenamos senha do Fully neste projeto.
+
+## Passo 6 — Parear a TV no piltover (uma vez)
+
+A TV abre a página **"Parear esta TV"**. Para ligá-la a um painel:
+
+1. No piltover (computador), vá em **Admin › Painéis › Conectar TV** e gere o código
+   (10 caracteres, válido por 30 minutos).
+2. Digite o código na TV com o controle remoto.
+
+> Atenção: o endereço `/tv` sozinho não existe no servidor (erro 404); use sempre `/tv/parear`.
 
 Pronto: desligue e ligue a TV — o Fully deve abrir direto no piltover.
 

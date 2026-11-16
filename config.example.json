@@ -4,7 +4,7 @@
   "adb_binary": "adb",
   "kiosk_package": "de.ozerov.fully",
   "kiosk_apk_path": "apk/fully-kiosk.apk",
-  "start_url": "https://piltover.grupoinlog.com.br/tv",
+  "start_url": "https://piltover.grupoinlog.com.br/tv/parear",
   "launch_mode": "kiosk_app_url",
   "watch_interval_seconds": 60,
   "max_relaunch_attempts": 3,

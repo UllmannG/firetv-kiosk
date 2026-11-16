@@ -915,7 +915,7 @@ def create_config(config_path: Path, device_ip: str, example_path: Path = EXAMPL
             raw = json.loads(example_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ConfigError(f"config.example.json inválido: {exc}") from exc
-    raw.setdefault("start_url", "https://piltover.grupoinlog.com.br/tv")
+    raw.setdefault("start_url", "https://piltover.grupoinlog.com.br/tv/parear")
     raw["device_ip"] = device_ip
     validate_config_dict(raw, config_path.resolve().parent)  # never write an invalid config
     config_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -1129,13 +1129,13 @@ class _TempDirTestCase(unittest.TestCase):
         self._tmp.cleanup()
 
     def make_config(self, **overrides) -> Config:
-        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv",
+        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv/parear",
                "log_file": "logs/test.log", "state_file": "logs/state.json"}
         raw.update(overrides)
         return validate_config_dict(raw, self.tmp)
 
     def write_config(self, **overrides) -> Path:
-        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv",
+        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv/parear",
                "log_file": "logs/test.log", "state_file": "logs/state.json"}
         raw.update(overrides)
         path = self.tmp / "config.json"
@@ -1175,7 +1175,7 @@ class ConfigTests(_TempDirTestCase):
 
     def test_url_without_scheme_rejected(self):
         """URL sem http/https é rejeitada."""
-        for url in ("piltover.grupoinlog.com.br/tv", "ftp://x.com", "https://"):
+        for url in ("piltover.grupoinlog.com.br/tv/parear", "ftp://x.com", "https://"):
             with self.assertRaises(ConfigError, msg=url) as ctx:
                 self.make_config(start_url=url)
             self.assertIn("start_url", str(ctx.exception))
@@ -1228,7 +1228,7 @@ class ConfigTests(_TempDirTestCase):
             self.fail(f"config.example.json ausente em {example}")
         raw = json.loads(example.read_text(encoding="utf-8"))
         cfg = validate_config_dict(raw, self.tmp)
-        self.assertEqual(cfg.start_url, "https://piltover.grupoinlog.com.br/tv")
+        self.assertEqual(cfg.start_url, "https://piltover.grupoinlog.com.br/tv/parear")
 
 
 class ConnectionTests(_TempDirTestCase):
@@ -1399,7 +1399,7 @@ class LaunchTests(_TempDirTestCase):
         code, output = self.run_main(["--config", str(self.write_config(launch_mode="silk_intent")), "launch"], runner)
         self.assertEqual(code, EXIT_OK, output)
         self.assertEqual(runner.commands_matching("am start"), [
-            "-s 192.168.0.50:5555 shell am start -a android.intent.action.VIEW -d https://piltover.grupoinlog.com.br/tv"])
+            "-s 192.168.0.50:5555 shell am start -a android.intent.action.VIEW -d https://piltover.grupoinlog.com.br/tv/parear"])
 
     def test_url_with_special_characters_is_shell_escaped(self):
         """URL com &, espaço e aspas é escapada para o shell do aparelho."""
@@ -1665,7 +1665,7 @@ class OpenTests(_TempDirTestCase):
     """One-click 'open' command used by the double-click launchers."""
 
     def example(self, **overrides) -> Path:
-        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv",
+        raw = {"device_ip": "192.168.0.50", "start_url": "https://piltover.grupoinlog.com.br/tv/parear",
                "launch_mode": "kiosk_app_url", "log_file": "logs/test.log", "state_file": "logs/state.json"}
         raw.update(overrides)
         path = self.tmp / "config.example.json"
@@ -1693,10 +1693,10 @@ class OpenTests(_TempDirTestCase):
         self.assertEqual(code, EXIT_OK, output)
         saved = json.loads((self.tmp / "config.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["device_ip"], "192.168.1.7")
-        self.assertEqual(saved["start_url"], "https://piltover.grupoinlog.com.br/tv")
+        self.assertEqual(saved["start_url"], "https://piltover.grupoinlog.com.br/tv/parear")
         self.assertEqual(runner.commands_matching("am start"), [
             "-s 192.168.1.7:5555 shell am start -a android.intent.action.VIEW "
-            "-d https://piltover.grupoinlog.com.br/tv -n de.ozerov.fully/.MainActivity"])
+            "-d https://piltover.grupoinlog.com.br/tv/parear -n de.ozerov.fully/.MainActivity"])
         self.assertIn("Pronto!", output)
 
     def test_existing_config_skips_discovery(self):
@@ -1715,7 +1715,7 @@ class OpenTests(_TempDirTestCase):
         code, output = self.run_open(runner, config_path=config)
         self.assertEqual(code, EXIT_OK, output)
         self.assertEqual(runner.commands_matching("am start"), [
-            "-s 192.168.0.50:5555 shell am start -a android.intent.action.VIEW -d https://piltover.grupoinlog.com.br/tv"])
+            "-s 192.168.0.50:5555 shell am start -a android.intent.action.VIEW -d https://piltover.grupoinlog.com.br/tv/parear"])
         self.assertEqual(runner.commands_matching("monkey"), [])
         self.assertIn("Silk", output)
 
@@ -1746,7 +1746,7 @@ class OpenTests(_TempDirTestCase):
 
     def test_invalid_existing_config_is_rejected(self):
         """config.json inválido: código 1 citando o campo, sem chamar ADB."""
-        config = self.write_config(start_url="piltover.grupoinlog.com.br/tv")
+        config = self.write_config(start_url="piltover.grupoinlog.com.br/tv/parear")
         runner = FakeAdbRunner(healthy_device_rules())
         code, output = self.run_open(runner, config_path=config)
         self.assertEqual(code, EXIT_FAILURE)
